@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Course-Grounded AI Tutor – Summary</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1f2328;
+    --muted: #59636e;
+    --line: #d1d9e0;
+    --head-bg: #f6f8fa;
+    --link: #0969da;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117;
+      --fg: #e6edf3;
+      --muted: #9198a1;
+      --line: #3d444d;
+      --head-bg: #151b23;
+      --link: #4493f8;
+      color-scheme: dark;
+    }
+  }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 17px;
+    line-height: 1.65;
+  }
+  main {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 40px 20px 64px;
+  }
+  h1 { font-size: 1.9rem; line-height: 1.25; margin: 0 0 8px; }
+  h2 { font-size: 1.35rem; margin: 40px 0 10px; border-bottom: 1px solid var(--line); padding-bottom: 4px; }
+  h3 { font-size: 1.05rem; margin: 24px 0 6px; }
+  p { margin: 0 0 12px; }
+  ul { margin: 0 0 12px; padding-left: 1.3em; }
+  li { margin-bottom: 6px; }
+  a { color: var(--link); }
+  code { font-family: Menlo, Consolas, monospace; font-size: 0.85em; }
+  .muted { color: var(--muted); }
+  .table-wrap { overflow-x: auto; margin: 8px 0 16px; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.95rem; }
+  th, td { border: 1px solid var(--line); padding: 6px 10px; text-align: left; vertical-align: top; }
+  th { background: var(--head-bg); }
+  td.n { text-align: right; white-space: nowrap; }
+  .shots { display: flex; flex-direction: column; gap: 28px; margin: 16px 0 8px; }
+  figure { margin: 0; }
+  figure img { display: block; width: 100%; max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: 6px; }
+  figcaption { font-size: 0.92rem; color: var(--muted); margin-top: 8px; }
+  figcaption strong { color: var(--fg); }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Course-Grounded AI Tutor</h1>
+<p class="muted">GSoC 2027, idea #2, by <a href="https://github.com/Mo-Khater">Mo-Khater</a>. Code: <a href="https://github.com/Mo-Khater/website/tree/learn/tutor-retrieval">learn/tutor-retrieval</a></p>
+
+<p>A tutor for each course that answers only from that course's materials, cites the page or slide it used, and follows rules set by the teacher. It runs on Cloudflare: Workers AI, Vectorize, D1 and R2.</p>
+
+<h2>Demo</h2>
+<p class="muted">The student's tutor card on an Algorithms course built from four chapters of Jeff Erickson's <em>Algorithms</em>.</p>
+<div class="shots">
+  <figure>
+    <img src="img/regular_mode.png" alt="The tutor answers two questions about divide and conquer and quicksort, citing Chapter 1 pages 10, 11 and 30." width="899" height="773" loading="lazy">
+    <figcaption><strong>Answer mode.</strong> Every fact carries a citation, and "Where this came from" opens the passage with its chapter and page.</figcaption>
+  </figure>
+  <figure>
+    <img src="img/follow_up_question.png" alt="The student asks what quicksort is, then what its worst-case running time is; the tutor answers about quicksort." width="913" height="699" loading="lazy">
+    <figcaption><strong>Follow-up questions.</strong> "What is its worst-case running time?" is understood as a question about quicksort.</figcaption>
+  </figure>
+  <figure>
+    <img src="img/hint_mode.png" alt="In hints-only mode, the tutor points to the source and asks a guiding question instead of answering." width="917" height="627" loading="lazy">
+    <figcaption><strong>Hints-only mode.</strong> The same two questions as above, after the teacher switched the tutor to hints: it points to the source and asks a guiding question instead of giving the answer.</figcaption>
+  </figure>
+  <figure>
+    <img src="img/questions_not_found_in_the_pdfs.png" alt="Questions about Dijkstra's algorithm and minimum spanning trees get a not-found reply." width="929" height="505" loading="lazy">
+    <figcaption><strong>Outside the course.</strong> Dijkstra's algorithm and minimum spanning trees aren't in the uploaded chapters, so the tutor says so instead of answering from general knowledge.</figcaption>
+  </figure>
+</div>
+
+<h2>Approach</h2>
+
+<h3>Indexing (when the teacher reindexes)</h3>
+<ul>
+  <li><strong>Collect course content.</strong> Pulls the description, objectives, sessions and materials, and decrypts the stored course text.</li>
+  <li><strong>File reading.</strong> PDF, Word, Excel and HTML go through Workers AI <code>toMarkdown</code>. PowerPoint uses a custom parser that keeps slide order and speaker notes.</li>
+  <li><strong>Sectioning.</strong> Splits text into sections, each tagged with a location (e.g. "page 3" or "slide 7") that is later used as the citation.</li>
+  <li><strong>Chunking.</strong> Removes links, merges tiny sections, splits long ones by meaning (max 1,200 characters), and de-duplicates repeated text.</li>
+  <li><strong>Embedding.</strong> bge-base-en-v1.5 vectors are stored in Vectorize, and the text is stored encrypted in D1. Only changed chunks are re-embedded.</li>
+</ul>
+
+<h3>Answering (when a student asks)</h3>
+<ul>
+  <li><strong>Refused-topic check.</strong> Blocks teacher-banned topics in code before any search or model call.</li>
+  <li><strong>Query understanding.</strong> Llama 3.1 8B detects follow-ups, writes 3 rewrites of the question, and extracts keywords.</li>
+  <li><strong>Search and rerank.</strong> Vector search on the question and its rewrites, then bge-reranker-base plus a keyword boost picks the top 5 passages.</li>
+  <li><strong>Answer generation.</strong> Llama 3.3 70B answers only from those passages, citing each fact. It is skipped if nothing relevant was found.</li>
+  <li><strong>Post-checks.</strong> Answers where less than half the claims are cited are withheld. Hedged "sources don't say" replies become "not found". Hints that leak the answer are retried, then replaced.</li>
+</ul>
+
+<h3>Other controls</h3>
+<p>The tutor is off by default, has daily limits, and logs every exchange for teacher review. Each course has its own isolated index.</p>
+
+<h2>Results</h2>
+
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr><th>Benchmark</th><th>Correct</th><th>Not found</th><th>Wrong</th><th>Notes</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Eval set (38 cases)</td><td class="n">37</td><td class="n">–</td><td class="n">1</td><td>-</td></tr>
+    <tr><td>CRAG (38 web questions)</td><td class="n">30</td><td class="n">–</td><td class="n">8</td><td>79% correct.</td></tr>
+    <tr><td>Qasper (112 paper questions)</td><td class="n">75</td><td class="n">14</td><td class="n">23</td><td>67% correct.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>Retrieval</h3>
+<p>How often the answer reached the top 5 passages (CRAG, 58 questions where the answer is in the pages):</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Setup</th><th>Hits</th><th>Rate</th></tr></thead>
+  <tbody>
+    <tr><td>Vector search only</td><td class="n">33 / 58</td><td class="n">57%</td></tr>
+    <tr><td>+ query instruction</td><td class="n">41 / 58</td><td class="n">71%</td></tr>
+    <tr><td>+ reranker</td><td class="n">47 / 58</td><td class="n">81%</td></tr>
+    <tr><td>+ query rewrites</td><td class="n">46 / 58</td><td class="n">79%</td></tr>
+  </tbody>
+</table>
+</div>
+<p>Query rewrites dropped the rate slightly but are kept because they make follow-up questions work.</p>
+
+<h3>PDF extraction</h3>
+<p><code>toMarkdown</code> got 26/38 correct and Tesseract OCR got 35/38 on one textbook chapter. OCR is much slower (about 0.5 s per page), so it would need to run as a background job.</p>
+
+</main>
+</body>
+</html>
